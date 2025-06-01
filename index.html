@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pluie et chutes de neige à Montréal-Trudeau (YUL) par jour de la semaine</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            text-align: center; 
+            margin: 0; 
+            padding: 20px; 
+        }
+        .chart-container { 
+            width: 100%; 
+            max-width: 1200px; 
+            margin: 20px auto; 
+        }
+        canvas { 
+            width: 100% !important; 
+            height: 400px !important; 
+        }
+        h1 { font-size: 24px; }
+        p { font-size: 16px; }
+        #dataLinks { 
+            max-width: 1200px; 
+            margin: 20px auto; 
+            border: 1px solid #ccc; 
+            padding: 10px; 
+            max-height: 200px; 
+            overflow-y: auto; 
+            text-align: left; 
+        }
+        #dataLinks a { 
+            display: block; 
+            margin: 5px 0; 
+        }
+        #dataLinks .success { color: green; }
+        #dataLinks .error { color: red; }
+        table { 
+            margin: 20px auto; 
+            border-collapse: collapse; 
+            max-width: 1200px; 
+        }
+        th, td { 
+            border: 1px solid #ccc; 
+            padding: 8px; 
+            text-align: center; 
+        }
+        th { background-color: #f2f2f2; }
+        button { 
+            padding: 10px 20px; 
+            font-size: 16px; 
+            cursor: pointer; 
+            background-color: #4CAF50; 
+            color: white; 
+            border: none; 
+            border-radius: 5px; 
+        }
+        button:hover { background-color: #45a049; }
+        select { 
+            padding: 10px; 
+            font-size: 16px; 
+            margin: 10px; 
+            border-radius: 5px; 
+        }
+    </style>
+</head>
+<body>
+    <h1>Pluie et chutes de neige moyennes à Montréal-Trudeau (YUL) par jour de la semaine (2014–2024)</h1>
+    <label for="yearSelect">Choisir une année :</label>
+    <select id="yearSelect">
+        <option value="all" selected>Toutes les années</option>
+        <option value="2014">2014</option>
+        <option value="2015">2015</option>
+        <option value="2016">2016</option>
+        <option value="2017">2017</option>
+        <option value="2018">2018</option>
+        <option value="2019">2019</option>
+        <option value="2020">2020</option>
+        <option value="2021">2021</option>
+        <option value="2022">2022</option>
+        <option value="2023">2023</option>
+        <option value="2024">2024</option>
+    </select>
+    <br>
+    <button id="calculateBtn">Calculer</button>
+    <p id="status">Cliquez sur "Calculer" pour charger les données...</p>
+    <div id="dataLinks"></div>
+    <div class="chart-container">
+        <canvas id="combinedChart"></canvas>
+    </div>
+    <table id="resultsTable" style="display: none;">
+        <thead>
+            <tr>
+                <th>Jour de la semaine</th>
+                <th>Pluie moyenne (mm)</th>
+                <th>Écart type pluie (mm)</th>
+                <th>Chutes de neige moyennes (cm)</th>
+                <th>Écart type chutes de neige (cm)</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+
+    <script>
+        // Configuration
+        const stationID = "7025251"; // Montréal-Trudeau (YUL)
+        const startYear = 2014;
+        const endYear = 2024;
+        const baseUrl = 'data/climate_daily_QC_'; // Local data folder
+        let currentChart = null; // Store the Chart.js instance
+
+        // Jours de la semaine
+        const daysOfWeek = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
+
+        // Initialisation des structures de données
+        let rainfallSums = new Array(7).fill(0); // Somme des précipitations par jour
+        let snowfallSums = new Array(7).fill(0); // Somme des chutes de neige par jour
+        let dayCounts = new Array(7).fill(0); // Compteur des jours pour la moyenne
+        let rainfallValues = Array.from({ length: 7 }, () => []); // Valeurs quotidiennes de précipitations
+        let snowfallValues = Array.from({ length: 7 }, () => []); // Valeurs quotidiennes de chutes de neige
+
+        // Mettre à jour le titre en fonction de l'année sélectionnée
+        function updateTitle() {
+            const year = document.getElementById('yearSelect').value;
+            const title = year === 'all' 
+                ? `Pluie et chutes de neige moyennes à Montréal-Trudeau (YUL) par jour de la semaine (2014–2024)`
+                : `Pluie et chutes de neige moyennes à Montréal-Trudeau (YUL) par jour de la semaine (${year})`;
+            document.querySelector('h1').textContent = title;
+        }
+
+        // Générer les URLs en fonction de l'année sélectionnée
+        function generateUrls() {
+            const year = document.getElementById('yearSelect').value;
+            const urls = [];
+            if (year === 'all') {
+                for (let y = startYear; y <= endYear; y++) {
+                    const url = `${baseUrl}${stationID}_${y}_P1D.csv`;
+                    urls.push({ url, year: y });
+                }
+            } else {
+                const url = `${baseUrl}${stationID}_${year}_P1D.csv`;
+                urls.push({ url, year });
+            }
+            return urls;
+        }
+
+        // Parser les données CSV
+        function parseCSV(data) {
+            const lines = data.split('\n');
+            const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim());
+            const precipIndex = headers.indexOf('Total Rain (mm)');
+            const snowIndex = headers.indexOf('Total Snow (cm)');
+            const dateIndex = headers.indexOf('Date/Time');
+
+            const results = [];
+            for (let i = 1; i < lines.length; i++) {
+                const row = lines[i].split(',').map(cell => cell.replace(/"/g, '').trim());
+                if (row.length > Math.max(precipIndex, snowIndex, dateIndex)) {
+                    const date = new Date(row[dateIndex]);
+                    if (!isNaN(date)) {
+                        const dayOfWeek = date.getDay();
+                        let precip = parseFloat(row[precipIndex]) || 0;
+                        let snow = parseFloat(row[snowIndex]) || 0;
+
+                        // Si Total Rain ou Total Snow est vide ou marqué "T" (traces), considérer comme 0
+                        if (row[precipIndex] === '' || row[precipIndex] === 'T') {
+                            precip = 0;
+                        }
+                        if (row[snowIndex] === '' || row[snowIndex] === 'T') {
+                            snow = 0;
+                        }
+
+                        results.push({ dayOfWeek, rain: precip, snow });
+                    }
+                }
+            }
+            return results;
+        }
+
+        // Agréger les données
+        function aggregateData(data) {
+            data.forEach(({ dayOfWeek, rain, snow }) => {
+                rainfallSums[dayOfWeek] += rain;
+                snowfallSums[dayOfWeek] += snow;
+                dayCounts[dayOfWeek]++;
+                rainfallValues[dayOfWeek].push(rain);
+                snowfallValues[dayOfWeek].push(snow);
+            });
+        }
+
+        // Calculer l'écart type
+        function calculateStandardDeviation(values, mean) {
+            if (values.length === 0) return 0;
+            const variance = values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / values.length;
+            return Math.sqrt(variance);
+        }
+
+        // Afficher les liens des fichiers et leur statut
+        function displayLinks(urls) {
+            const dataLinksDiv = document.getElementById('dataLinks');
+            dataLinksDiv.innerHTML = '<h3>Fichiers de données chargés :</h3>';
+            urls.forEach(({ url, year }) => {
+                const link = document.createElement('a');
+                link.href = url;
+                link.textContent = `Données pour ${year}`;
+                link.target = '_blank';
+                dataLinksDiv.appendChild(link);
+                const statusSpan = document.createElement('span');
+                statusSpan.id = `status-${year}`;
+                statusSpan.textContent = ' (Chargement...)';
+                dataLinksDiv.appendChild(statusSpan);
+            });
+        }
+
+        // Mettre à jour le statut du fichier
+        function updateFileStatus(year, success) {
+            const statusSpan = document.getElementById(`status-${year}`);
+            if (statusSpan) {
+                statusSpan.textContent = success ? ' (Chargé correctement)' : ' (Échec du chargement)';
+                statusSpan.className = success ? 'success' : 'error';
+            }
+        }
+
+        // Afficher le tableau des résultats
+        function displayTable(rainfallAverages, rainfallStdDevs, snowfallAverages, snowfallStdDevs) {
+            const tbody = document.querySelector('#resultsTable tbody');
+            tbody.innerHTML = '';
+            daysOfWeek.forEach((day, i) => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${day}</td>
+                    <td>${rainfallAverages[i].toFixed(2)}</td>
+                    <td>${rainfallStdDevs[i].toFixed(2)}</td>
+                    <td>${snowfallAverages[i].toFixed(2)}</td>
+                    <td>${snowfallStdDevs[i].toFixed(2)}</td>
+                `;
+                tbody.appendChild(row);
+            });
+            document.getElementById('resultsTable').style.display = 'table';
+        }
+
+        // Récupérer et traiter les données
+        async function fetchData() {
+            const status = document.getElementById('status');
+            status.textContent = 'Chargement des données, veuillez patienter...';
+            const urls = generateUrls();
+            displayLinks(urls);
+
+            const promises = urls.map(({ url, year }) =>
+                fetch(url)
+                    .then(response => {
+                        if (!response.ok) throw new Error(`Échec du chargement ${year}`);
+                        return response.text();
+                    })
+                    .then(data => {
+                        updateFileStatus(year, true);
+                        return parseCSV(data);
+                    })
+                    .catch(error => {
+                        console.warn(`Erreur lors du chargement ${year} : ${error.message}`);
+                        updateFileStatus(year, false);
+                        return [];
+                    })
+            );
+
+            const results = await Promise.all(promises);
+            results.forEach(aggregateData);
+
+            // Calculer les moyennes
+            const rainfallAverages = rainfallSums.map((sum, i) => dayCounts[i] > 0 ? sum / dayCounts[i] : 0);
+            const snowfallAverages = snowfallSums.map((sum, i) => dayCounts[i] > 0 ? sum / dayCounts[i] : 0);
+
+            // Calculer les écarts types
+            const rainfallStdDevs = rainfallValues.map((values, i) => 
+                calculateStandardDeviation(values, rainfallAverages[i])
+            );
+            const snowfallStdDevs = snowfallValues.map((values, i) => 
+                calculateStandardDeviation(values, snowfallAverages[i])
+            );
+
+            // Mettre à jour l'interface
+            status.textContent = 'Données chargées avec succès !';
+            plotChart(rainfallAverages, snowfallAverages);
+            displayTable(rainfallAverages, rainfallStdDevs, snowfallAverages, snowfallStdDevs);
+        }
+
+        // Tracer le graphique combiné avec Chart.js
+        function plotChart(rainfallAverages, snowfallAverages) {
+            // Détruire l'ancien graphique s'il existe
+            if (currentChart) {
+                currentChart.destroy();
+            }
+
+            // Déterminer le titre du graphique en fonction de l'année
+            const year = document.getElementById('yearSelect').value;
+            const chartTitle = year === 'all'
+                ? 'Pluie et chutes de neige moyennes par jour de la semaine (2014–2024)'
+                : `Pluie et chutes de neige moyennes par jour de la semaine (${year})`;
+
+            // Créer un nouveau graphique
+            currentChart = new Chart(document.getElementById('combinedChart'), {
+                type: 'bar',
+                data: {
+                    labels: daysOfWeek,
+                    datasets: [
+                        {
+                            label: 'Pluie moyenne (mm)',
+                            data: rainfallAverages,
+                            backgroundColor: '#1e90ff',
+                            borderColor: '#1e90ff',
+                            borderWidth: 1,
+                            yAxisID: 'y-rain'
+                        },
+                        {
+                            label: 'Chutes de neige moyennes (cm)',
+                            data: snowfallAverages,
+                            backgroundColor: '#b0c4de',
+                            borderColor: '#b0c4de',
+                            borderWidth: 1,
+                            yAxisID: 'y-snow'
+                        }
+                    ]
+                },
+                options: {
+                    scales: {
+                        'y-rain': {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Pluie (mm)'
+                            }
+                        },
+                        'y-snow': {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Chutes de neige (cm)'
+                            },
+                            grid: {
+                                drawOnChartArea: false
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Jour de la semaine'
+                            }
+                        }
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: chartTitle
+                        },
+                        legend: {
+                            display: true,
+                            position: 'right'
+                        }
+                    },
+                    responsive: true,
+                    maintainAspectRatio: false
+                }
+            });
+        }
+
+        // Réinitialiser les données
+        function resetData() {
+            rainfallSums = new Array(7).fill(0);
+            snowfallSums = new Array(7).fill(0);
+            dayCounts = new Array(7).fill(0);
+            rainfallValues = Array.from({ length: 7 }, () => []);
+            snowfallValues = Array.from({ length: 7 }, () => []);
+            document.getElementById('dataLinks').innerHTML = '';
+            document.getElementById('status').textContent = 'Cliquez sur "Calculer" pour charger les données...';
+            document.getElementById('resultsTable').style.display = 'none';
+        }
+
+        // Mettre à jour le titre initial
+        updateTitle();
+
+        // Événement pour le changement d'année
+        document.getElementById('yearSelect').addEventListener('change', () => {
+            resetData();
+            updateTitle();
+        });
+
+        // Événement pour le bouton Calculer
+        document.getElementById('calculateBtn').addEventListener('click', () => {
+            resetData();
+            fetchData().catch(error => {
+                console.error('Erreur :', error);
+                document.getElementById('status').textContent = 'Erreur lors du chargement des données. Veuillez réessayer.';
+            });
+        });
+    </script>
+</body>
+</html>
