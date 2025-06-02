@@ -96,9 +96,9 @@
             <tr>
                 <th>Jour de la semaine</th>
                 <th>Pluie moyenne (mm)</th>
-                <th>Écart type pluie (mm)</th>
+                <th>Pluie maximum (mm)</th>
                 <th>Chutes de neige moyennes (cm)</th>
-                <th>Écart type chutes de neige (cm)</th>
+                <th>Chutes de neige maximum (cm)</th>
             </tr>
         </thead>
         <tbody></tbody>
@@ -191,11 +191,10 @@
             });
         }
 
-        // Calculer l'écart type
-        function calculateStandardDeviation(values, mean) {
+        // Calculer le maximum
+        function calculateMaximum(values) {
             if (values.length === 0) return 0;
-            const variance = values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / values.length;
-            return Math.sqrt(variance);
+            return Math.max(...values);
         }
 
         // Afficher les liens des fichiers et leur statut
@@ -225,7 +224,7 @@
         }
 
         // Afficher le tableau des résultats
-        function displayTable(rainfallAverages, rainfallStdDevs, snowfallAverages, snowfallStdDevs) {
+        function displayTable(rainfallAverages, rainfallMaxima, snowfallAverages, snowfallMaxima) {
             const tbody = document.querySelector('#resultsTable tbody');
             tbody.innerHTML = '';
             daysOfWeek.forEach((day, i) => {
@@ -233,9 +232,9 @@
                 row.innerHTML = `
                     <td>${day}</td>
                     <td>${rainfallAverages[i].toFixed(2)}</td>
-                    <td>${rainfallStdDevs[i].toFixed(2)}</td>
+                    <td>${rainfallMaxima[i].toFixed(2)}</td>
                     <td>${snowfallAverages[i].toFixed(2)}</td>
-                    <td>${snowfallStdDevs[i].toFixed(2)}</td>
+                    <td>${snowfallMaxima[i].toFixed(2)}</td>
                 `;
                 tbody.appendChild(row);
             });
@@ -273,18 +272,14 @@
             const rainfallAverages = rainfallSums.map((sum, i) => dayCounts[i] > 0 ? sum / dayCounts[i] : 0);
             const snowfallAverages = snowfallSums.map((sum, i) => dayCounts[i] > 0 ? sum / dayCounts[i] : 0);
 
-            // Calculer les écarts types
-            const rainfallStdDevs = rainfallValues.map((values, i) => 
-                calculateStandardDeviation(values, rainfallAverages[i])
-            );
-            const snowfallStdDevs = snowfallValues.map((values, i) => 
-                calculateStandardDeviation(values, snowfallAverages[i])
-            );
+            // Calculer les maxima
+            const rainfallMaxima = rainfallValues.map(values => calculateMaximum(values));
+            const snowfallMaxima = snowfallValues.map(values => calculateMaximum(values));
 
             // Mettre à jour l'interface
             status.textContent = 'Données chargées avec succès !';
             plotChart(rainfallAverages, snowfallAverages);
-            displayTable(rainfallAverages, rainfallStdDevs, snowfallAverages, snowfallStdDevs);
+            displayTable(rainfallAverages, rainfallMaxima, snowfallAverages, snowfallMaxima);
         }
 
         // Tracer le graphique combiné avec Chart.js
